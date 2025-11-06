@@ -10,6 +10,16 @@ sysinfo = "0.31"
 tokio = { version = "1.35", features = ["full"] }
 clap = { version = "4.4", features = ["derive"] }
 
+# GPU monitoring
+nvml-wrapper = "0.10"
+libamdgpu_top = "0.6"
+
+# Battery monitoring (cross-platform)
+battery = "0.10"
+
+# Fan speed monitoring (Linux)
+libmedium = "0.5"
+
 [profile.release]
 opt-level = 3
 lto = true

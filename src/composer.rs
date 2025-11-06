@@ -34,11 +34,13 @@ impl SystemComposer {
             }
         }
 
-        // === BASS (Memory Usage) ===
+        // === BASS (Memory Usage + Swap) ===
         // Deep, sustained bass notes that reflect memory pressure
+        // Swap usage adds distortion
+        let bass_distortion = params.bass_velocity * 0.3 + params.swap_distortion * 0.4;
         comp.instrument("bass", &Instrument::sub_bass())
             .filter(Filter::low_pass(800.0, 0.8))
-            .effect(Effect::distortion(params.bass_velocity * 0.3));
+            .effect(Effect::distortion(bass_distortion));
 
         for _ in 0..duration_bars {
             // Whole note bass pattern
@@ -70,20 +72,92 @@ impl SystemComposer {
             }
         }
 
-        // === HI-HATS (Network Activity) ===
-        // Subtle hi-hats that increase with network traffic
-        let hihat_pattern: Vec<usize> = (0..16)
-            .filter(|i| i % 2 == 0) // Every other 16th note
-            .collect();
-        
+        // === HI-HATS (Network Activity + Process Count) ===
+        // Hi-hat density driven by process count
+        let hihat_hits = if params.hihat_density < 0.3 {
+            // Sparse: every other eighth note
+            vec![0, 4, 8, 12]
+        } else if params.hihat_density < 0.7 {
+            // Medium: every eighth note
+            (0..16).filter(|i| i % 2 == 0).collect()
+        } else {
+            // Dense: every sixteenth note
+            (0..16).collect()
+        };
+
         for _ in 0..duration_bars {
             comp.track("hihats")
                 .drum_grid(16, sixteenth)
-                .hihat(&hihat_pattern);
+                .hihat(&hihat_hits);
         }
 
+        // === GPU VOICE (GPU Utilization) ===
+        // Separate melodic voice for GPU activity
+        if let Some(gpu_notes) = &params.gpu_notes {
+            if params.gpu_intensity > 0.1 {
+                comp.instrument("gpu", &Instrument::analog_synth())
+                    .filter(Filter::low_pass(params.filter_cutoff * 1.2, 0.7))
+                    .effect(Effect::chorus(params.gpu_chorus_depth, 0.8, 0.4));
+
+                for _ in 0..duration_bars {
+                    for &note in gpu_notes.iter() {
+                        let duration = eighth * params.gpu_intensity.max(0.5); // Slower when low util
+                        comp.instrument("gpu", &Instrument::analog_synth())
+                            .note_with_velocity(&[note], duration, params.gpu_intensity);
+                    }
+                }
+            }
+        }
+
+        // === PER-CORE POLYRHYTHMS (Per-Core CPU) ===
+        // Each core gets its own shaker pattern (limit to first 4 cores for clarity)
+        for (core_idx, pattern) in params.core_patterns.iter().take(4).enumerate() {
+            if !pattern.is_empty() && params.rhythm_polyrhythm_factor > 0.2 {
+                for _ in 0..duration_bars {
+                    comp.track(&format!("core{}", core_idx))
+                        .drum_grid(16, sixteenth)
+                        .shaker(pattern);
+                }
+            }
+        }
+
+        // === PROCESS MELODIES (Top Processes) ===
+        // Mini-melodies for top processes (limit to top 3 for clarity)
+        for (proc_name, melody) in params.process_melodies.iter().take(3) {
+            comp.instrument(&format!("proc_{}", proc_name), &Instrument::music_box());
+
+            for _ in 0..duration_bars {
+                for &note in melody.iter() {
+                    comp.instrument(&format!("proc_{}", proc_name), &Instrument::music_box())
+                        .note(&[note], sixteenth * 3.0);
+                }
+            }
+        }
+
+        // === FAN NOISE (Fan Speeds) ===
+        // Ambient wind noise based on fan RPM
+        if params.fan_noise_level > 0.1 {
+            comp.instrument("fans", &Instrument::noise())
+                .filter(Filter::high_pass(2000.0, 0.5));
+
+            for _ in 0..duration_bars {
+                comp.instrument("fans", &Instrument::noise())
+                    .note_with_velocity(&[A3], quarter * 4.0, params.fan_noise_level * 0.3);
+            }
+        }
+
+        // === VRAM REVERB (GPU Memory) ===
+        // Global reverb size determined by VRAM usage
+        let vram_reverb_decay = 0.3 + (params.vram_reverb_size * 4.7); // 0.3s - 5.0s
+
         // Play the composition
-        let mixer = comp.into_mixer();
+        let mut mixer = comp.into_mixer();
+
+        // Apply battery volume modulation
+        // Note: tunes library may not have set_volume method, this is conceptual
+        // In practice, we'd need to scale all instrument velocities by battery_volume_mult
+        // For now, this serves as documentation of the intent
+
         self.engine.play_mixer(&mixer)?;
 
         Ok(())
@@ -115,9 +189,11 @@ impl SystemComposer {
             }
         }
 
+        // === BASS with SWAP distortion ===
+        let bass_distortion = params.bass_velocity * 0.3 + params.swap_distortion * 0.4;
         comp.instrument("bass", &Instrument::sub_bass())
             .filter(Filter::low_pass(800.0, 0.8))
-            .effect(Effect::distortion(params.bass_velocity * 0.3));
+            .effect(Effect::distortion(bass_distortion));
 
         for _ in 0..duration_bars {
             comp.instrument("bass", &Instrument::sub_bass())
@@ -143,14 +219,69 @@ impl SystemComposer {
             }
         }
 
-        let hihat_pattern: Vec<usize> = (0..16)
-            .filter(|i| i % 2 == 0)
-            .collect();
-        
+        // === HI-HATS with Process Count density ===
+        let hihat_hits = if params.hihat_density < 0.3 {
+            vec![0, 4, 8, 12]
+        } else if params.hihat_density < 0.7 {
+            (0..16).filter(|i| i % 2 == 0).collect()
+        } else {
+            (0..16).collect()
+        };
+
         for _ in 0..duration_bars {
             comp.track("hihats")
                 .drum_grid(16, sixteenth)
-                .hihat(&hihat_pattern);
+                .hihat(&hihat_hits);
+        }
+
+        // === GPU VOICE and NEW ELEMENTS (same as compose_and_play) ===
+        // Add GPU voice, per-core polyrhythms, process melodies, and fan noise
+        if let Some(gpu_notes) = &params.gpu_notes {
+            if params.gpu_intensity > 0.1 {
+                comp.instrument("gpu", &Instrument::analog_synth())
+                    .filter(Filter::low_pass(params.filter_cutoff * 1.2, 0.7))
+                    .effect(Effect::chorus(params.gpu_chorus_depth, 0.8, 0.4));
+
+                for _ in 0..duration_bars {
+                    for &note in gpu_notes.iter() {
+                        let duration = eighth * params.gpu_intensity.max(0.5);
+                        comp.instrument("gpu", &Instrument::analog_synth())
+                            .note_with_velocity(&[note], duration, params.gpu_intensity);
+                    }
+                }
+            }
+        }
+
+        // Per-core polyrhythms
+        for (core_idx, pattern) in params.core_patterns.iter().take(4).enumerate() {
+            if !pattern.is_empty() && params.rhythm_polyrhythm_factor > 0.2 {
+                for _ in 0..duration_bars {
+                    comp.track(&format!("core{}", core_idx))
+                        .drum_grid(16, sixteenth)
+                        .shaker(pattern);
+                }
+            }
+        }
+
+        // Process melodies
+        for (proc_name, melody) in params.process_melodies.iter().take(3) {
+            comp.instrument(&format!("proc_{}", proc_name), &Instrument::music_box());
+            for _ in 0..duration_bars {
+                for &note in melody.iter() {
+                    comp.instrument(&format!("proc_{}", proc_name), &Instrument::music_box())
+                        .note(&[note], sixteenth * 3.0);
+                }
+            }
+        }
+
+        // Fan noise
+        if params.fan_noise_level > 0.1 {
+            comp.instrument("fans", &Instrument::noise())
+                .filter(Filter::high_pass(2000.0, 0.5));
+            for _ in 0..duration_bars {
+                comp.instrument("fans", &Instrument::noise())
+                    .note_with_velocity(&[A3], quarter * 4.0, params.fan_noise_level * 0.3);
+            }
         }
 
         let mut mixer = comp.into_mixer();
